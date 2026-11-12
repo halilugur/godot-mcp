@@ -4,13 +4,15 @@ extends EditorPlugin
 ## Nothing in this addon opens an outbound connection or collects telemetry.
 
 const McpServer := preload("mcp_server.gd")
-const McpTools := preload("mcp_tools_extra.gd")
+const McpTools := preload("mcp_tools.gd")
 const OutputCapture := preload("output_capture.gd")
 const DebuggerBridge := preload("debugger_bridge.gd")
 
 const SETTING_PORT := "local_mcp/port"
 const SETTING_TOKEN := "local_mcp/auth_token"
 const SETTING_RUNTIME := "local_mcp/enable_game_runtime"
+const SETTING_READ_ONLY := "local_mcp/read_only"
+const SETTING_COMPACT := "local_mcp/compact_mode"
 const DEFAULT_PORT := 9777
 const RUNTIME_AUTOLOAD := "LocalMcpRuntime"
 const MENU_ITEM := "Local MCP: Copy connection info"
@@ -24,6 +26,8 @@ func _enter_tree() -> void:
 	_register_setting(SETTING_PORT, DEFAULT_PORT, TYPE_INT)
 	_register_setting(SETTING_TOKEN, "", TYPE_STRING)
 	_register_setting(SETTING_RUNTIME, true, TYPE_BOOL)
+	_register_setting(SETTING_READ_ONLY, false, TYPE_BOOL)
+	_register_setting(SETTING_COMPACT, false, TYPE_BOOL)
 
 	_capture = OutputCapture.new()
 	_capture.setup()

@@ -1,16 +1,125 @@
 @tool
 extends RefCounted
-## Tool definitions and implementations. Everything runs on the editor main thread.
+## Central MCP tool registry, shared editor/runtime helpers, and modular pack loader.
 
+const Values := preload("mcp_values.gd")
 const TEXT_EXTENSIONS := ["gd", "tscn", "tres", "cs", "gdshader", "gdshaderinc", "cfg", "json", "md", "txt", "godot", "csv", "xml", "yml", "yaml", "toml", "ini", "import"]
 const MAX_READ_BYTES := 400 * 1024
 const SKIP_DIRS := [".godot", ".git", ".import"]
-const Values := preload("mcp_values.gd")
+
+const ProjectTools := preload("tools/project_tools.gd")
+const FileTools := preload("tools/file_tools.gd")
+const SceneTools := preload("tools/scene_tools.gd")
+const NodeTools := preload("tools/node_tools.gd")
+const ScriptTools := preload("tools/script_tools.gd")
+const EditorTools := preload("tools/editor_tools.gd")
+const ResourceTools := preload("tools/resource_tools.gd")
+const VisualTools := preload("tools/visual_tools.gd")
+const UiTools := preload("tools/ui_tools.gd")
+const AnimationTools := preload("tools/animation_tools.gd")
+const AudioTools := preload("tools/audio_tools.gd")
+const TileTools := preload("tools/tile_tools.gd")
+const WorldTools := preload("tools/world_tools.gd")
+const PhysicsTools := preload("tools/physics_tools.gd")
+const RuntimeTools := preload("tools/runtime_tools.gd")
+
+const CUSTOM_TOOLS_DIR := "res://mcp_tools"
+const RUNTIME_AUTOLOAD := "LocalMcpRuntime"
+const COMPACT_CORE_TOOLS := [
+	"get_project_info", "list_files", "read_file", "write_file", "edit_file",
+	"open_scene", "save_scene", "get_scene_tree", "add_node", "set_node_properties",
+	"run_project", "stop_project", "get_output", "take_screenshot", "discover_tools",
+]
+const TOOL_CATEGORIES := {
+	"project": [
+		"get_project_info", "get_project_settings", "set_project_setting", "get_project_statistics",
+		"list_input_actions", "add_input_action", "remove_input_action", "add_standard_input_preset",
+		"add_autoload", "remove_autoload", "get_autoload_info", "list_export_presets",
+		"export_project", "manage_editor_plugins", "git_status",
+	],
+	"filesystem": [
+		"list_files", "read_file", "write_file", "edit_file", "create_directory", "move_file",
+		"delete_file", "search_files", "rescan_filesystem", "set_import_settings",
+		"clean_orphan_imports", "get_asset_info", "edit_config_file", "find_broken_references",
+	],
+	"scene": [
+		"open_scene", "create_scene", "save_scene", "reload_scene", "get_open_scenes",
+		"get_scene_tree", "get_scene_metrics", "list_scene_dependencies", "check_scene_warnings",
+		"save_branch_as_scene", "set_editable_children", "find_resource_usages",
+	],
+	"node": [
+		"add_node", "batch_add_nodes", "delete_node", "move_node", "duplicate_node",
+		"replace_node_type", "find_nodes", "get_node_properties", "set_node_properties",
+		"batch_set_properties", "set_node_groups", "set_node_unique_name", "connect_signal",
+		"batch_connect_signals", "get_node_signals", "setup_timer",
+	],
+	"script": [
+		"create_script", "attach_script", "validate_script", "validate_all_scripts",
+		"get_script_symbols", "add_script_member", "rename_symbol_in_project", "lint_gdscript",
+		"get_class_info", "search_classes", "search_class_members",
+	],
+	"editor": [
+		"get_selection", "select_nodes", "open_in_editor", "undo", "redo", "get_editor_state",
+		"set_editor_screen", "focus_editor_camera", "take_screenshot", "execute_editor_script",
+	],
+	"resource": [
+		"create_resource", "get_resource_properties", "set_resource_properties", "duplicate_resource",
+		"create_gradient", "create_noise_texture", "create_curve_resource", "list_translations",
+		"set_translation_entries",
+	],
+	"visual": [
+		"create_shader", "get_shader_params", "set_shader_params", "setup_world_environment",
+		"create_particle_system", "get_sprite_frames", "set_sprite_frames", "setup_camera",
+		"setup_light", "setup_2d_vector_node", "setup_3d_fx_node", "setup_parallax", "setup_subviewport",
+	],
+	"ui": [
+		"create_stylebox", "configure_theme", "set_theme_overrides", "set_ui_anchors_preset",
+		"setup_ui_container", "setup_label_settings",
+	],
+	"animation": [
+		"get_animations", "set_animation", "remove_animation", "get_animation_tree",
+		"control_animation_tree", "build_animation_state_machine", "setup_blend_space",
+	],
+	"audio": [
+		"list_audio_buses", "configure_audio_bus", "setup_audio_player", "create_audio_randomizer",
+	],
+	"tilemap_world": [
+		"get_tilemap_cells", "set_tilemap_cells", "fill_tilemap_rect", "paint_tilemap_terrain",
+		"get_tileset_info", "setup_tileset_source", "get_gridmap_cells", "set_gridmap_cells",
+		"create_mesh_library", "create_primitive_mesh", "create_csg_shape", "populate_multimesh",
+		"setup_path", "get_skeleton_bones", "add_bone_attachment", "arrange_nodes",
+	],
+	"physics_nav": [
+		"setup_collision_shape", "generate_mesh_collision", "create_physics_joint",
+		"setup_raycast", "physics_layers", "setup_navigation_node", "bake_navigation_mesh",
+	],
+	"runtime": [
+		"run_project", "stop_project", "get_output", "set_breakpoint", "run_tests",
+		"setup_multiplayer_sync", "game_get_scene_tree", "game_get_node_properties",
+		"game_set_node_properties", "game_call_method", "game_send_input", "game_screenshot",
+		"game_resume", "game_execute_script", "game_get_performance_monitors", "game_find_nodes",
+		"game_pause", "game_set_time_scale", "game_change_scene", "game_get_groups",
+		"game_emit_signal", "game_get_ui_elements", "game_raycast", "game_watch_signals",
+		"game_set_locale", "game_get_camera_info", "game_spawn_node", "game_destroy_node",
+		"game_teleport_node", "game_mouse_drag", "game_get_physics_info", "game_eval_expression",
+		"game_step_frames", "game_get_orphan_nodes",
+	],
+	"toolkit": [
+		"user_list_files", "user_read_file", "user_write_file", "user_delete_file",
+		"discover_tools", "reload_custom_tools",
+	],
+}
 
 var _plugin: EditorPlugin
 var _capture: RefCounted
+var _bridge: EditorDebuggerPlugin
 var _defs: Array = []
 var _names := {}
+var _handlers := {}
+var _modules := []
+var _custom_names := {}
+var _custom_instances := []
+var _tool_category_map := {}
 var _shots := {}
 var _next_shot := -1
 
@@ -21,20 +130,121 @@ func _init(plugin: EditorPlugin, capture: RefCounted) -> void:
 	_build_definitions()
 
 
-# ---------------------------------------------------------------- registry
+func set_bridge(bridge: EditorDebuggerPlugin) -> void:
+	_bridge = bridge
+
+
+func _build_definitions() -> void:
+	_defs.clear()
+	_names.clear()
+	_handlers.clear()
+	_tool_category_map.clear()
+	for cat in TOOL_CATEGORIES:
+		for tname in TOOL_CATEGORIES[cat]:
+			_tool_category_map[tname] = cat
+	_modules = [
+		ProjectTools.new(),
+		FileTools.new(),
+		SceneTools.new(),
+		NodeTools.new(),
+		ScriptTools.new(),
+		EditorTools.new(),
+		ResourceTools.new(),
+		VisualTools.new(),
+		UiTools.new(),
+		AnimationTools.new(),
+		AudioTools.new(),
+		TileTools.new(),
+		WorldTools.new(),
+		PhysicsTools.new(),
+		RuntimeTools.new(),
+	]
+	for mod in _modules:
+		mod.register(self)
+	load_custom_extensions()
+
+
+func _register_tool(tname: String, description: String, properties := {}, required := [], read_only := false, destructive := false, handler := Callable()) -> void:
+	_names[tname] = true
+	_defs.append({
+		"name": tname,
+		"description": description,
+		"inputSchema": {"type": "object", "properties": properties, "required": required},
+		"annotations": {"readOnlyHint": read_only, "destructiveHint": destructive},
+	})
+	if handler.is_valid():
+		_handlers[tname] = handler
+
+
+func is_read_only_mode() -> bool:
+	var env := OS.get_environment("LOCAL_MCP_READ_ONLY").to_lower()
+	if env in ["1", "true", "yes"]:
+		return true
+	return bool(ProjectSettings.get_setting("local_mcp/read_only", false))
+
+
+func is_compact_mode() -> bool:
+	var env := OS.get_environment("LOCAL_MCP_COMPACT").to_lower()
+	if env in ["1", "true", "yes"]:
+		return true
+	return bool(ProjectSettings.get_setting("local_mcp/compact_mode", false))
+
+
+func all_tool_definitions() -> Array:
+	if not is_read_only_mode():
+		return _defs
+	var out := []
+	for d in _defs:
+		if bool(d.get("annotations", {}).get("readOnlyHint", false)):
+			out.append(d)
+	return out
+
 
 func list_tools() -> Array:
-	return _defs
+	var pool := all_tool_definitions()
+	if not is_compact_mode():
+		return pool
+	var out := []
+	for d in pool:
+		var n := str(d["name"])
+		if n in COMPACT_CORE_TOOLS or _custom_names.has(n):
+			out.append(d)
+	return out
 
 
-func has_tool(name: String) -> bool:
-	return _names.has(name)
+func get_tool_category(tname: String) -> String:
+	if _custom_names.has(tname):
+		return "custom"
+	return str(_tool_category_map.get(tname, "general"))
 
 
-func call_tool(name: String, args: Dictionary) -> Dictionary:
-	var result: Variant = call("_tool_" + name, args)
+func get_category_summary() -> Dictionary:
+	var counts := {}
+	for d in all_tool_definitions():
+		var cat := get_tool_category(str(d["name"]))
+		counts[cat] = int(counts.get(cat, 0)) + 1
+	return counts
+
+
+func has_tool(tname: String) -> bool:
+	return _names.has(tname)
+
+
+func _is_tool_read_only(tname: String) -> bool:
+	for d in _defs:
+		if str(d["name"]) == tname:
+			return bool(d.get("annotations", {}).get("readOnlyHint", false))
+	return false
+
+
+func call_tool(tname: String, args: Dictionary) -> Dictionary:
+	if is_read_only_mode() and not _is_tool_read_only(tname):
+		return format_result(_err("Read-only mode is active (local_mcp/read_only). Mutating tool '%s' is disabled." % tname))
+	if not _handlers.has(tname):
+		return format_result(_err("Unknown tool: " + tname))
+	var result: Variant = _handlers[tname].call(args)
 	if result is Dictionary and result.has("__pending"):
-		return result  # Answered later through poll_pending().
+		return result
 	return format_result(result)
 
 
@@ -47,135 +257,94 @@ func format_result(result: Variant) -> Dictionary:
 	return {"content": [{"type": "text", "text": Values.clean_text(text)}], "isError": false}
 
 
-## Tools that answer on a later frame return {"__pending": ticket}; the server then polls
-## this every frame. Returns null while still waiting. Negative tickets are local screenshots.
 func poll_pending(ticket: int) -> Variant:
-	if not _shots.has(ticket):
-		return format_result(_err("Nothing is pending."))
-	var shot: Dictionary = _shots[ticket]
-	shot["frames"] -= 1
-	if shot["frames"] > 0:
+	if ticket < 0:
+		if not _shots.has(ticket):
+			return format_result(_err("Nothing is pending."))
+		var shot: Dictionary = _shots[ticket]
+		shot["frames"] -= 1
+		if shot["frames"] > 0:
+			return null
+		_shots.erase(ticket)
+		var cap: Variant = _capture_viewport(shot["target"], shot["max_width"])
+		return format_result(cap)
+	if _bridge == null:
+		return format_result(_err("Debugger bridge is not ready."))
+	var answer: Variant = _bridge.take(ticket)
+	if answer == null:
 		return null
-	_shots.erase(ticket)
-	return format_result(_capture_viewport(shot["target"], shot["max_width"]))
+	if answer is Dictionary and answer.has("image_base64"):
+		return format_result({"__image": answer["image_base64"]})
+	return format_result(answer)
 
 
 func cancel_pending(ticket: int) -> void:
-	_shots.erase(ticket)
+	if ticket < 0:
+		_shots.erase(ticket)
+	elif _bridge != null:
+		_bridge.cancel(ticket)
 
 
-func _add(name: String, description: String, properties := {}, required := [], read_only := false, destructive := false) -> void:
-	_names[name] = true
-	_defs.append({
-		"name": name,
-		"description": description,
-		"inputSchema": {"type": "object", "properties": properties, "required": required},
-		"annotations": {"readOnlyHint": read_only, "destructiveHint": destructive},
-	})
+func _game(command: String, args: Dictionary) -> Dictionary:
+	if not _plugin.get_editor_interface().is_playing_scene():
+		return _err("No game is running. Call run_project first.")
+	if _bridge == null:
+		return _err("Debugger bridge is not active.")
+	var ticket: int = _bridge.send_command(command, args)
+	if ticket < 0:
+		return _err("Game runtime is not connected yet (try again in a moment, or check that LocalMcpRuntime autoload is active).")
+	return {"__pending": ticket}
 
 
-func _build_definitions() -> void:
-	var s := {"type": "string"}
-	var node_path := {"type": "string", "description": "Node path relative to the edited scene root. '.' is the root, e.g. 'Player/Sprite2D'."}
+func load_custom_extensions() -> Dictionary:
+	for cname in _custom_names.keys():
+		_handlers.erase(cname)
+		_names.erase(cname)
+	for i in range(_defs.size() - 1, -1, -1):
+		if _custom_names.has(str(_defs[i]["name"])):
+			_defs.remove_at(i)
+	_custom_names.clear()
+	_custom_instances.clear()
 
-	_add("get_project_info", "Project name, Godot version, main scene, open scenes, autoloads and run state. Call this first.", {}, [], true)
-	_add("list_files", "List project files under a res:// directory.", {
-		"dir": {"type": "string", "description": "Directory, default res://"},
-		"recursive": {"type": "boolean", "description": "Default true"},
-		"extensions": {"type": "array", "items": s, "description": "Only these extensions, e.g. [\"gd\", \"tscn\"]"},
-	}, [], true)
-	_add("read_file", "Read a text file (script, scene, resource, config) from the project.", {
-		"path": {"type": "string", "description": "res:// path"},
-		"start_line": {"type": "integer", "description": "1-based first line, default 1"},
-		"max_lines": {"type": "integer", "description": "Default: whole file"},
-	}, ["path"], true)
-	_add("write_file", "Create or overwrite a text file in the project. GDScript files are compiled afterwards and any errors are returned. Do not use this to edit a scene that is open in the editor; use the node tools instead.", {
-		"path": {"type": "string", "description": "res:// path"},
-		"content": s,
-	}, ["path", "content"])
-	_add("search_files", "Case-insensitive text search across project text files.", {
-		"query": s,
-		"dir": {"type": "string", "description": "Default res://"},
-		"extensions": {"type": "array", "items": s, "description": "Default: gd, tscn, tres, cs, gdshader, cfg, json, md, txt"},
-		"max_results": {"type": "integer", "description": "Default 100"},
-	}, ["query"], true)
-	_add("validate_script", "Compile a GDScript file and return its errors.", {"path": {"type": "string", "description": "res:// path to a .gd file"}}, ["path"], true)
+	if not DirAccess.dir_exists_absolute(CUSTOM_TOOLS_DIR):
+		return {"loaded": 0, "tools": []}
+	var da := DirAccess.open(CUSTOM_TOOLS_DIR)
+	if da == null:
+		return {"loaded": 0, "tools": []}
 
-	_add("open_scene", "Open a scene in the editor and make it the edited scene.", {"path": {"type": "string", "description": "res:// path to a .tscn/.scn"}}, ["path"])
-	_add("create_scene", "Create a new scene file with a root node and open it.", {
-		"path": {"type": "string", "description": "res:// path ending in .tscn"},
-		"root_type": {"type": "string", "description": "Node class for the root, e.g. Node2D, Node3D, Control, CharacterBody2D"},
-		"root_name": {"type": "string", "description": "Default: file name"},
-	}, ["path", "root_type"])
-	_add("save_scene", "Save the edited scene. Pass path to save as a new file.", {"path": {"type": "string", "description": "Optional res:// path for 'save as'"}})
-	_add("get_scene_tree", "Node tree of the edited scene: names, types, scripts, instanced scenes.", {
-		"node_path": {"type": "string", "description": "Subtree root, default '.'"},
-		"max_depth": {"type": "integer", "description": "Default 8"},
-	}, [], true)
+	var loaded_tools := []
+	var errors := []
+	da.list_dir_begin()
+	var entry := da.get_next()
+	while entry != "":
+		if not da.current_is_dir() and entry.ends_with(".gd"):
+			var path := CUSTOM_TOOLS_DIR.path_join(entry)
+			var scr := ResourceLoader.load(path, "", ResourceLoader.CACHE_MODE_IGNORE) as Script
+			if scr == null:
+				errors.append("Failed to load: " + path)
+			else:
+				var inst: Variant = scr.new()
+				_custom_instances.append(inst)
+				if inst.has_method("get_mcp_tools") and inst.has_method("call_mcp_tool"):
+					var defs: Variant = inst.call("get_mcp_tools")
+					if defs is Array:
+						for td in defs:
+							if td is Dictionary and td.has("name"):
+								var tname := str(td["name"])
+								_custom_names[tname] = true
+								_register_tool(
+									tname,
+									str(td.get("description", "")),
+									td.get("properties", {}),
+									td.get("required", []),
+									bool(td.get("read_only", false)),
+									bool(td.get("destructive", false)),
+									func(a: Dictionary) -> Variant: return inst.call("call_mcp_tool", tname, a)
+								)
+								loaded_tools.append(tname)
+		entry = da.get_next()
+	return {"loaded": loaded_tools.size(), "tools": loaded_tools, "errors": errors}
 
-	_add("get_node_properties", "Properties, script, groups and signal connections of a node.", {
-		"node_path": node_path,
-		"properties": {"type": "array", "items": s, "description": "Only these properties. Default: all editor-visible properties."},
-	}, ["node_path"], true)
-	_add("set_node_properties", "Set properties on a node (undoable). Values: JSON for bool/number/string; Godot expression strings for the rest, e.g. \"Vector2(10, 20)\", \"Color(1, 0, 0)\"; res:// paths for resources (use property 'script' to attach a script); null to clear. Sub-properties work as 'position:x'.", {
-		"node_path": node_path,
-		"properties": {"type": "object", "description": "Property name -> value"},
-	}, ["node_path", "properties"])
-	_add("add_node", "Add a node to the edited scene (undoable). Give either type (a class name, built-in or class_name) or scene_path (to instance a scene).", {
-		"parent_path": {"type": "string", "description": "Parent node path, default '.'"},
-		"type": {"type": "string", "description": "Node class, e.g. Sprite2D"},
-		"scene_path": {"type": "string", "description": "res:// scene to instance instead of type"},
-		"name": s,
-		"properties": {"type": "object", "description": "Initial properties, same value rules as set_node_properties"},
-		"index": {"type": "integer", "description": "Position among siblings, default last"},
-	})
-	_add("delete_node", "Delete a node and its children from the edited scene (undoable).", {"node_path": node_path}, ["node_path"])
-	_add("move_node", "Rename, reparent and/or reorder a node (undoable).", {
-		"node_path": node_path,
-		"new_name": s,
-		"new_parent_path": {"type": "string", "description": "New parent node path"},
-		"index": {"type": "integer", "description": "New position among siblings"},
-	}, ["node_path"])
-	_add("connect_signal", "Connect (or disconnect) a node's signal to a method on another node; saved with the scene.", {
-		"node_path": node_path,
-		"signal": s,
-		"target_path": {"type": "string", "description": "Node that has the method"},
-		"method": s,
-		"disconnect": {"type": "boolean", "description": "Remove the connection instead. Default false."},
-	}, ["node_path", "signal", "target_path", "method"])
-
-	_add("run_project", "Run the game from the editor.", {
-		"mode": {"type": "string", "enum": ["main", "current", "custom"], "description": "main scene (default), currently edited scene, or a custom scene"},
-		"scene_path": {"type": "string", "description": "Scene for mode=custom"},
-	})
-	_add("stop_project", "Stop the running game.")
-	_add("get_output", "Recent log output. source=editor: editor messages and script errors. source=game: the log file of the last game run (prints, errors, stack traces).", {
-		"source": {"type": "string", "enum": ["editor", "game"], "description": "Default editor"},
-		"lines": {"type": "integer", "description": "Default 100"},
-	}, [], true)
-	_add("take_screenshot", "PNG screenshot of the editor: the 2D viewport, the 3D viewport, or the whole editor window.", {
-		"target": {"type": "string", "enum": ["2d", "3d", "editor"], "description": "Default editor"},
-		"max_width": {"type": "integer", "description": "Downscale to this width. Default 1280."},
-	}, [], true)
-
-	_add("get_class_info", "Properties, methods and signals of a Godot class. Use it instead of guessing API names.", {
-		"class_name": s,
-		"include_inherited": {"type": "boolean", "description": "Default false"},
-	}, ["class_name"], true)
-	_add("get_project_settings", "Read project settings by name, or list the names under a prefix.", {
-		"names": {"type": "array", "items": s, "description": "e.g. [\"application/run/main_scene\"]"},
-		"prefix": {"type": "string", "description": "List settings starting with this, e.g. \"input/\""},
-	}, [], true)
-	_add("set_project_setting", "Set a project setting and save project.godot. Same value rules as set_node_properties.", {
-		"name": s,
-		"value": {"description": "New value; null removes an override"},
-	}, ["name", "value"])
-	_add("execute_editor_script", "Run GDScript inside the editor for anything the other tools do not cover. The code is the body of `func run(plugin: EditorPlugin, scene: Node)`; use `return` to send back a value. EditorInterface is available. No `await`.", {
-		"code": {"type": "string", "description": "Function body, e.g. \"return scene.get_child_count()\""},
-	}, ["code"])
-
-
-# ---------------------------------------------------------------- helpers
 
 func _err(message: String) -> Dictionary:
 	return {"__error": message}
@@ -277,6 +446,68 @@ func _filesystem_changed(path: String, created: bool) -> void:
 		fs.update_file(path)
 
 
+func _scan() -> void:
+	var fs := EditorInterface.get_resource_filesystem()
+	if fs != null and not fs.is_scanning():
+		fs.scan()
+
+
+func _walk(dir_path: String, recursive: bool, extensions: Array, out: Array, limit: int) -> void:
+	var dir := DirAccess.open(dir_path)
+	if dir == null:
+		return
+	dir.include_hidden = false
+	var base := dir_path if dir_path.ends_with("/") else dir_path + "/"
+	var dirs := Array(dir.get_directories())
+	var files := Array(dir.get_files())
+	dirs.sort()
+	files.sort()
+	for f in files:
+		if out.size() >= limit:
+			return
+		var ext := str(f).get_extension().to_lower()
+		if extensions.is_empty():
+			if ext == "import" or ext == "uid":
+				continue
+		elif not extensions.has(ext):
+			continue
+		out.append(base + f)
+	if recursive:
+		for d in dirs:
+			if d in SKIP_DIRS:
+				continue
+			_walk(base + d, true, extensions, out, limit)
+
+
+func _capture_viewport(target: String, max_width: int) -> Dictionary:
+	var viewport: Viewport
+	match target:
+		"2d":
+			viewport = EditorInterface.get_editor_viewport_2d()
+		"3d":
+			viewport = EditorInterface.get_editor_viewport_3d(0)
+		_:
+			viewport = EditorInterface.get_base_control().get_viewport()
+	var texture := viewport.get_texture() if viewport != null else null
+	var image: Image = texture.get_image() if texture != null else null
+	if image == null or image.is_empty():
+		return _err("Could not capture the viewport.")
+	if image.get_width() > max_width:
+		image.resize(max_width, int(float(image.get_height()) * max_width / image.get_width()), Image.INTERPOLATE_LANCZOS)
+	return {"__image": Marshalls.raw_to_base64(image.save_png_to_buffer())}
+
+
+func _add_child_undo(parent: Node, child: Node, label: String) -> void:
+	var root: Node = _root()
+	var ur: EditorUndoRedoManager = _plugin.get_undo_redo()
+	ur.create_action(label)
+	ur.add_do_method(parent, "add_child", child, true)
+	ur.add_do_property(child, "owner", root)
+	ur.add_do_reference(child)
+	ur.add_undo_method(parent, "remove_child", child)
+	ur.commit_action()
+
+
 func _error_lines(lines: PackedStringArray) -> Array:
 	var out := []
 	for line in lines:
@@ -317,302 +548,6 @@ func _compile_script(path: String, new_source: Variant = null) -> Dictionary:
 
 # ---------------------------------------------------------------- project and files
 
-func _tool_get_project_info(_args: Dictionary) -> Variant:
-	var root := _root()
-	var autoloads := {}
-	for prop in ProjectSettings.get_property_list():
-		var n := str(prop["name"])
-		if n.begins_with("autoload/"):
-			autoloads[n.substr(9)] = str(ProjectSettings.get_setting(n)).trim_prefix("*")
-	return {
-		"project_name": ProjectSettings.get_setting("application/config/name", ""),
-		"godot_version": Engine.get_version_info()["string"],
-		"project_dir": ProjectSettings.globalize_path("res://"),
-		"main_scene": ProjectSettings.get_setting("application/run/main_scene", ""),
-		"edited_scene": root.scene_file_path if root != null else null,
-		"edited_scene_root": ("%s (%s)" % [root.name, root.get_class()]) if root != null else null,
-		"open_scenes": Array(EditorInterface.get_open_scenes()).filter(func(p): return p != ""),
-		"autoloads": autoloads,
-		"is_playing": EditorInterface.is_playing_scene(),
-	}
-
-
-func _walk(dir_path: String, recursive: bool, extensions: Array, out: Array, limit: int) -> void:
-	var dir := DirAccess.open(dir_path)
-	if dir == null:
-		return
-	dir.include_hidden = false
-	var base := dir_path if dir_path.ends_with("/") else dir_path + "/"
-	var dirs := Array(dir.get_directories())
-	var files := Array(dir.get_files())
-	dirs.sort()
-	files.sort()
-	for f in files:
-		if out.size() >= limit:
-			return
-		var ext := str(f).get_extension().to_lower()
-		if extensions.is_empty():
-			if ext == "import" or ext == "uid":
-				continue
-		elif not extensions.has(ext):
-			continue
-		out.append(base + f)
-	if recursive:
-		for d in dirs:
-			if d in SKIP_DIRS:
-				continue
-			_walk(base + d, true, extensions, out, limit)
-
-
-func _extensions_arg(value: Variant) -> Array:
-	var out := []
-	if value is Array:
-		for e in value:
-			out.append(str(e).trim_prefix(".").to_lower())
-	return out
-
-
-func _tool_list_files(args: Dictionary) -> Variant:
-	var dir := _res_path(args.get("dir", "res://"))
-	if dir == "" or not DirAccess.dir_exists_absolute(dir):
-		return _err("Directory not found: " + str(args.get("dir", "")))
-	var files := []
-	_walk(dir, bool(args.get("recursive", true)), _extensions_arg(args.get("extensions")), files, 2000)
-	return {"dir": dir, "count": files.size(), "truncated": files.size() >= 2000, "files": files}
-
-
-func _tool_read_file(args: Dictionary) -> Variant:
-	var path := _res_path(args.get("path", ""))
-	if path == "" or not FileAccess.file_exists(path):
-		return _err("File not found: " + str(args.get("path", "")))
-	var file := FileAccess.open(path, FileAccess.READ)
-	if file == null:
-		return _err("Cannot open %s: %s" % [path, error_string(FileAccess.get_open_error())])
-	if file.get_length() > MAX_READ_BYTES and not args.has("max_lines"):
-		return _err("File is %d bytes. Read it in parts with start_line and max_lines." % file.get_length())
-	var text := file.get_as_text()
-	if not args.has("start_line") and not args.has("max_lines"):
-		return text
-	var lines := text.split("\n")
-	var start := maxi(_to_int(args.get("start_line"), 1), 1) - 1
-	var count := _to_int(args.get("max_lines"), lines.size())
-	return "\n".join(lines.slice(start, start + maxi(count, 0)))
-
-
-func _tool_write_file(args: Dictionary) -> Variant:
-	var path := _res_path(args.get("path", ""))
-	if path == "" or path == "res://":
-		return _err("Path must be inside the project (res://...).")
-	if not (args.get("content") is String):
-		return _err("content must be a string.")
-	return _write_text(path, args["content"])
-
-
-func _write_text(path: String, content: String) -> Dictionary:
-	var ext := path.get_extension().to_lower()
-	if not TEXT_EXTENSIONS.has(ext):
-		return _err("Only text files can be written (.%s is not allowed). Allowed: %s" % [ext, ", ".join(TEXT_EXTENSIONS)])
-	var created := not FileAccess.file_exists(path)
-	var dir_err := DirAccess.make_dir_recursive_absolute(path.get_base_dir())
-	if dir_err != OK:
-		return _err("Cannot create directory: " + error_string(dir_err))
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	if file == null:
-		return _err("Cannot write %s: %s" % [path, error_string(FileAccess.get_open_error())])
-	file.store_string(content)
-	file.close()
-	_filesystem_changed(path, created)
-	var out := {"path": path, "created": created, "bytes": content.to_utf8_buffer().size()}
-	if ext == "gd":
-		out["script_check"] = _compile_script(path, content)
-	var root := _root()
-	if (ext == "tscn" or ext == "tres") and not created and root != null and root.scene_file_path == path:
-		out["note"] = "This scene is open in the editor; call open_scene again to reload it from disk."
-	return out
-
-
-func _tool_search_files(args: Dictionary) -> Variant:
-	var query := str(args.get("query", "")).to_lower()
-	if query == "":
-		return _err("query is empty.")
-	var dir := _res_path(args.get("dir", "res://"))
-	if dir == "" or not DirAccess.dir_exists_absolute(dir):
-		return _err("Directory not found: " + str(args.get("dir", "")))
-	var extensions := _extensions_arg(args.get("extensions"))
-	if extensions.is_empty():
-		extensions = ["gd", "tscn", "tres", "cs", "gdshader", "cfg", "json", "md", "txt"]
-	var limit := clampi(_to_int(args.get("max_results"), 100), 1, 1000)
-	var files := []
-	_walk(dir, true, extensions, files, 5000)
-	var matches := []
-	for path in files:
-		var file := FileAccess.open(path, FileAccess.READ)
-		if file == null or file.get_length() > 2 * 1024 * 1024:
-			continue
-		var lines := file.get_as_text().split("\n")
-		for i in lines.size():
-			if lines[i].to_lower().contains(query):
-				matches.append("%s:%d: %s" % [path, i + 1, lines[i].strip_edges().left(200)])
-				if matches.size() >= limit:
-					return {"count": matches.size(), "truncated": true, "matches": matches}
-	return {"count": matches.size(), "truncated": false, "matches": matches}
-
-
-func _tool_validate_script(args: Dictionary) -> Variant:
-	var path := _res_path(args.get("path", ""))
-	if path == "" or not FileAccess.file_exists(path):
-		return _err("File not found: " + str(args.get("path", "")))
-	if path.get_extension().to_lower() != "gd":
-		return _err("Only .gd files can be validated.")
-	var result := _compile_script(path, FileAccess.get_file_as_string(path))
-	result["path"] = path
-	return result
-
-
-# ---------------------------------------------------------------- scenes
-
-func _tool_open_scene(args: Dictionary) -> Variant:
-	var path := _res_path(args.get("path", ""))
-	if path == "" or not ResourceLoader.exists(path):
-		return _err("Scene not found: " + str(args.get("path", "")))
-	if path in EditorInterface.get_open_scenes():
-		EditorInterface.reload_scene_from_path(path)
-	EditorInterface.open_scene_from_path(path)
-	var root := _root()
-	if root == null or root.scene_file_path != path:
-		return _err("The editor did not open %s. Check get_output for errors." % path)
-	return {"opened": path, "root": "%s (%s)" % [root.name, root.get_class()]}
-
-
-func _tool_create_scene(args: Dictionary) -> Variant:
-	var path := _res_path(args.get("path", ""))
-	if path == "" or not (path.get_extension().to_lower() in ["tscn", "scn"]):
-		return _err("path must be a res:// path ending in .tscn")
-	if FileAccess.file_exists(path):
-		return _err("File already exists: %s. Use open_scene, or pick another path." % path)
-	var root := _instantiate(str(args.get("root_type", "")))
-	if root == null:
-		return _err("'%s' is not a Node class that can be instantiated." % str(args.get("root_type", "")))
-	var root_name := str(args.get("root_name", ""))
-	root.name = root_name if root_name != "" else path.get_file().get_basename().to_pascal_case()
-	DirAccess.make_dir_recursive_absolute(path.get_base_dir())
-	var packed := PackedScene.new()
-	var err := packed.pack(root)
-	if err == OK:
-		err = ResourceSaver.save(packed, path)
-	root.free()
-	if err != OK:
-		return _err("Could not save scene: " + error_string(err))
-	var fs := EditorInterface.get_resource_filesystem()
-	if fs != null:
-		fs.update_file(path)
-	EditorInterface.open_scene_from_path(path)
-	return {"created": path, "opened": _root() != null and _root().scene_file_path == path}
-
-
-func _tool_save_scene(args: Dictionary) -> Variant:
-	var root := _root()
-	if root == null:
-		return _err("No scene is open.")
-	if args.has("path") and str(args["path"]) != "":
-		var path := _res_path(args["path"])
-		if path == "" or not (path.get_extension().to_lower() in ["tscn", "scn"]):
-			return _err("path must be a res:// path ending in .tscn")
-		DirAccess.make_dir_recursive_absolute(path.get_base_dir())
-		EditorInterface.save_scene_as(path)
-		return {"saved": path}
-	if root.scene_file_path == "":
-		return _err("This scene has never been saved. Pass path.")
-	var err := EditorInterface.save_scene()
-	if err != OK:
-		return _err("Save failed: " + error_string(err))
-	return {"saved": root.scene_file_path}
-
-
-func _describe_node(node: Node, root: Node, depth: int, max_depth: int) -> Dictionary:
-	var info := {"name": str(node.name), "type": node.get_class()}
-	var script: Variant = node.get_script()
-	if script is Script and script.resource_path != "":
-		info["script"] = script.resource_path
-	if node != root and node.scene_file_path != "":
-		info["instance_of"] = node.scene_file_path
-	var children := []
-	var hidden := 0
-	for child in node.get_children():
-		if child.owner != root:
-			continue  # Internals of instanced scenes and editor-only helpers.
-		if depth >= max_depth:
-			hidden += 1
-		else:
-			children.append(_describe_node(child, root, depth + 1, max_depth))
-	if not children.is_empty():
-		info["children"] = children
-	if hidden > 0:
-		info["children_not_shown"] = hidden
-	return info
-
-
-func _tool_get_scene_tree(args: Dictionary) -> Variant:
-	var root := _root()
-	if root == null:
-		return _err("No scene is open in the editor. Use open_scene or create_scene first.")
-	var start := _find(args.get("node_path", "."))
-	if start == null:
-		return _no_node(args.get("node_path"))
-	return {
-		"scene": root.scene_file_path,
-		"path": _path_of(start),
-		"tree": _describe_node(start, root, 0, clampi(_to_int(args.get("max_depth"), 8), 0, 64)),
-	}
-
-
-# ---------------------------------------------------------------- nodes
-
-func _tool_get_node_properties(args: Dictionary) -> Variant:
-	var node := _find(args.get("node_path", ""))
-	if node == null:
-		return _no_node(args.get("node_path"))
-	var wanted: Variant = args.get("properties")
-	var props := {}
-	if wanted is Array and not wanted.is_empty():
-		for name in wanted:
-			var key := str(name)
-			var base := key.split(":")[0]
-			if base in node:
-				props[key] = Values.to_json(node.get_indexed(NodePath(key)) if key.contains(":") else node.get(key))
-			else:
-				props[key] = "<no such property>"
-	else:
-		for p in node.get_property_list():
-			if (p["usage"] & PROPERTY_USAGE_EDITOR) == 0:
-				continue
-			if p["usage"] & (PROPERTY_USAGE_CATEGORY | PROPERTY_USAGE_GROUP | PROPERTY_USAGE_SUBGROUP):
-				continue
-			props[p["name"]] = Values.to_json(node.get(p["name"]))
-	var connections := []
-	for sig in node.get_signal_list():
-		for conn in node.get_signal_connection_list(sig["name"]):
-			if (conn["flags"] & CONNECT_PERSIST) == 0:
-				continue
-			var callable: Callable = conn["callable"]
-			var target: Variant = callable.get_object()
-			connections.append({
-				"signal": str(sig["name"]),
-				"target": _path_of(target) if target is Node else str(target),
-				"method": str(callable.get_method()),
-			})
-	var groups := []
-	for g in node.get_groups():
-		if not str(g).begins_with("_"):
-			groups.append(str(g))
-	var out := {"path": _path_of(node), "type": node.get_class(), "properties": props}
-	if not groups.is_empty():
-		out["groups"] = groups
-	if not connections.is_empty():
-		out["connections"] = connections
-	return out
-
-
 func _prepare_properties(node: Object, values: Dictionary) -> Array:
 	# Returns [changes, errors]; each change is [key, indexed, new_value, old_value].
 	var types := {}
@@ -641,188 +576,110 @@ func _prepare_properties(node: Object, values: Dictionary) -> Array:
 	return [changes, errors]
 
 
-func _tool_set_node_properties(args: Dictionary) -> Variant:
-	var node := _find(args.get("node_path", ""))
-	if node == null:
-		return _no_node(args.get("node_path"))
-	var values: Variant = args.get("properties")
-	if not (values is Dictionary) or values.is_empty():
-		return _err("properties must be a non-empty object.")
-	var prepared := _prepare_properties(node, values)
-	if not prepared[1].is_empty():
-		return _err("Nothing was changed.\n" + "\n".join(prepared[1]))
-	var ur := _plugin.get_undo_redo()
-	ur.create_action("MCP: Set properties on %s" % node.name, UndoRedo.MERGE_DISABLE, node)
-	for change in prepared[0]:
-		if change[1]:
-			ur.add_do_method(node, "set_indexed", NodePath(change[0]), change[2])
-			ur.add_undo_method(node, "set_indexed", NodePath(change[0]), change[3])
-		else:
-			ur.add_do_property(node, change[0], change[2])
-			ur.add_undo_property(node, change[0], change[3])
-	ur.commit_action()
-	var now := {}
-	for change in prepared[0]:
-		now[change[0]] = Values.to_json(node.get_indexed(NodePath(change[0])) if change[1] else node.get(change[0]))
-	return {"path": _path_of(node), "properties": now}
-
-
-func _tool_add_node(args: Dictionary) -> Variant:
+func _write_text(path: String, content: String) -> Dictionary:
+	var ext := path.get_extension().to_lower()
+	if not TEXT_EXTENSIONS.has(ext):
+		return _err("Only text files can be written (.%s is not allowed). Allowed: %s" % [ext, ", ".join(TEXT_EXTENSIONS)])
+	var created := not FileAccess.file_exists(path)
+	var dir_err := DirAccess.make_dir_recursive_absolute(path.get_base_dir())
+	if dir_err != OK:
+		return _err("Cannot create directory: " + error_string(dir_err))
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if file == null:
+		return _err("Cannot write %s: %s" % [path, error_string(FileAccess.get_open_error())])
+	file.store_string(content)
+	file.close()
+	_filesystem_changed(path, created)
+	var out := {"path": path, "created": created, "bytes": content.to_utf8_buffer().size()}
+	if ext == "gd":
+		out["script_check"] = _compile_script(path, content)
 	var root := _root()
-	if root == null:
-		return _err("No scene is open in the editor. Use open_scene or create_scene first.")
-	var parent := _find(args.get("parent_path", "."))
-	if parent == null:
-		return _no_node(args.get("parent_path"))
-	var node: Node
-	var scene_path := str(args.get("scene_path", ""))
-	if scene_path != "":
-		scene_path = _res_path(scene_path)
-		if scene_path == "" or not ResourceLoader.exists(scene_path):
-			return _err("Scene not found: " + str(args.get("scene_path")))
-		if scene_path == root.scene_file_path:
-			return _err("A scene cannot instance itself.")
-		var packed: Variant = load(scene_path)
-		if not (packed is PackedScene):
-			return _err("Not a scene: " + scene_path)
-		node = packed.instantiate(PackedScene.GEN_EDIT_STATE_INSTANCE)
-	else:
-		var type := str(args.get("type", ""))
-		if type == "":
-			return _err("Give either type or scene_path.")
-		node = _instantiate(type)
-		if node == null:
-			return _err("'%s' is not a Node class that can be instantiated. Use get_class_info to check names." % type)
-	if node == null:
-		return _err("Could not create the node.")
-	if str(args.get("name", "")) != "":
-		node.name = str(args["name"])
-	var values: Variant = args.get("properties")
-	if values is Dictionary and not values.is_empty():
-		var prepared := _prepare_properties(node, values)
-		if not prepared[1].is_empty():
-			node.free()
-			return _err("Node was not added.\n" + "\n".join(prepared[1]))
-		for change in prepared[0]:
-			if change[1]:
-				node.set_indexed(NodePath(change[0]), change[2])
-			else:
-				node.set(change[0], change[2])
-	var ur := _plugin.get_undo_redo()
-	ur.create_action("MCP: Add %s" % node.name, UndoRedo.MERGE_DISABLE, root)
-	ur.add_do_method(parent, "add_child", node, true)
-	ur.add_do_method(node, "set_owner", root)
-	if args.has("index"):
-		ur.add_do_method(parent, "move_child", node, _to_int(args["index"], -1))
-	ur.add_do_reference(node)
-	ur.add_undo_method(parent, "remove_child", node)
-	ur.commit_action()
-	return {"path": _path_of(node), "name": str(node.name), "type": node.get_class()}
-
-
-func _tool_delete_node(args: Dictionary) -> Variant:
-	var root := _root()
-	var node := _find(args.get("node_path", ""))
-	if node == null:
-		return _no_node(args.get("node_path"))
-	if node == root:
-		return _err("The scene root cannot be deleted.")
-	var parent := node.get_parent()
-	var path := _path_of(node)
-	var ur := _plugin.get_undo_redo()
-	ur.create_action("MCP: Delete %s" % node.name, UndoRedo.MERGE_DISABLE, root)
-	ur.add_do_method(parent, "remove_child", node)
-	ur.add_undo_method(parent, "add_child", node, true)
-	ur.add_undo_method(parent, "move_child", node, node.get_index())
-	for pair in _owned_nodes(node):
-		if pair[1] != null:
-			ur.add_undo_method(pair[0], "set_owner", pair[1])
-	ur.add_undo_reference(node)
-	ur.commit_action()
-	return {"deleted": path}
-
-
-func _tool_move_node(args: Dictionary) -> Variant:
-	var root := _root()
-	var node := _find(args.get("node_path", ""))
-	if node == null:
-		return _no_node(args.get("node_path"))
-	var old_parent := node.get_parent()
-	var new_parent := old_parent
-	if args.has("new_parent_path"):
-		if node == root:
-			return _err("The scene root cannot be reparented.")
-		new_parent = _find(args["new_parent_path"])
-		if new_parent == null:
-			return _no_node(args["new_parent_path"])
-		if new_parent == node or node.is_ancestor_of(new_parent):
-			return _err("A node cannot be moved into itself or its own children.")
-	var new_name := str(args.get("new_name", ""))
-	if not args.has("new_parent_path") and new_name == "" and not args.has("index"):
-		return _err("Give new_name, new_parent_path and/or index.")
-	if args.has("index") and node == root:
-		return _err("The scene root has no sibling index.")
-	var ur := _plugin.get_undo_redo()
-	ur.create_action("MCP: Move %s" % node.name, UndoRedo.MERGE_DISABLE, root)
-	if new_parent != old_parent:
-		var owners := _owned_nodes(node)
-		ur.add_do_method(old_parent, "remove_child", node)
-		ur.add_do_method(new_parent, "add_child", node, true)
-		ur.add_undo_method(new_parent, "remove_child", node)
-		ur.add_undo_method(old_parent, "add_child", node, true)
-		ur.add_undo_method(old_parent, "move_child", node, node.get_index())
-		for pair in owners:
-			if pair[1] != null:
-				ur.add_do_method(pair[0], "set_owner", pair[1])
-				ur.add_undo_method(pair[0], "set_owner", pair[1])
-	if new_name != "":
-		ur.add_do_property(node, "name", new_name)
-		ur.add_undo_property(node, "name", str(node.name))
-	if args.has("index"):
-		ur.add_do_method(new_parent, "move_child", node, _to_int(args["index"], -1))
-		if new_parent == old_parent:
-			ur.add_undo_method(old_parent, "move_child", node, node.get_index())
-	ur.commit_action()
-	return {"path": _path_of(node), "name": str(node.name), "index": node.get_index() if node != root else 0}
-
-
-func _tool_connect_signal(args: Dictionary) -> Variant:
-	var node := _find(args.get("node_path", ""))
-	if node == null:
-		return _no_node(args.get("node_path"))
-	var target := _find(args.get("target_path", ""))
-	if target == null:
-		return _no_node(args.get("target_path"))
-	var signal_name := str(args.get("signal", ""))
-	var method := str(args.get("method", ""))
-	if not node.has_signal(signal_name):
-		var names := []
-		for sig in node.get_signal_list():
-			names.append(str(sig["name"]))
-		return _err("%s has no signal '%s'. Signals: %s" % [node.get_class(), signal_name, ", ".join(names)])
-	if method == "":
-		return _err("method is empty.")
-	var callable := Callable(target, method)
-	var connected := node.is_connected(signal_name, callable)
-	var remove := bool(args.get("disconnect", false))
-	if remove and not connected:
-		return _err("That connection does not exist.")
-	if not remove and connected:
-		return {"already_connected": true}
-	var ur := _plugin.get_undo_redo()
-	ur.create_action("MCP: %s signal %s" % ["Disconnect" if remove else "Connect", signal_name], UndoRedo.MERGE_DISABLE, _root())
-	if remove:
-		ur.add_do_method(node, "disconnect", signal_name, callable)
-		ur.add_undo_method(node, "connect", signal_name, callable, CONNECT_PERSIST)
-	else:
-		ur.add_do_method(node, "connect", signal_name, callable, CONNECT_PERSIST)
-		ur.add_undo_method(node, "disconnect", signal_name, callable)
-	ur.commit_action()
-	var out := {"signal": signal_name, "from": _path_of(node), "to": _path_of(target), "method": method, "connected": not remove}
-	var script: Variant = target.get_script()
-	if not remove and not target.has_method(method) and not (script is Script and method in _script_methods(script)):
-		out["warning"] = "Target has no method '%s' yet. Add it to the target's script." % method
+	if (ext == "tscn" or ext == "tres") and not created and root != null and root.scene_file_path == path:
+		out["note"] = "This scene is open in the editor; call open_scene again to reload it from disk."
 	return out
+
+
+func _make_input_event(spec: Variant) -> Variant:
+	# Returns an InputEvent, or a String with the problem.
+	if not (spec is Dictionary):
+		return "each event must be an object"
+	if spec.has("key"):
+		var code := OS.find_keycode_from_string(str(spec["key"]))
+		if code == KEY_NONE:
+			return "unknown key '%s' (use names like W, Space, Enter, Escape, Left, Shift)" % str(spec["key"])
+		var k := InputEventKey.new()
+		if bool(spec.get("physical", true)):
+			k.physical_keycode = code
+		else:
+			k.keycode = code
+		k.shift_pressed = bool(spec.get("shift", false))
+		k.ctrl_pressed = bool(spec.get("ctrl", false))
+		k.alt_pressed = bool(spec.get("alt", false))
+		k.meta_pressed = bool(spec.get("meta", false))
+		k.device = -1
+		return k
+	if spec.has("mouse_button"):
+		var names := {"left": 1, "right": 2, "middle": 3, "wheel_up": 4, "wheel_down": 5}
+		var raw: Variant = spec["mouse_button"]
+		var index: int = names.get(str(raw).to_lower(), _to_int(raw, 0))
+		if index <= 0:
+			return "unknown mouse button '%s' (use left, right, middle, wheel_up, wheel_down or a number)" % str(raw)
+		var b := InputEventMouseButton.new()
+		b.button_index = index as MouseButton
+		b.device = -1
+		return b
+	if spec.has("joypad_button"):
+		var j := InputEventJoypadButton.new()
+		j.button_index = _to_int(spec["joypad_button"], 0) as JoyButton
+		j.device = -1
+		return j
+	if spec.has("joypad_axis"):
+		var m := InputEventJoypadMotion.new()
+		m.axis = _to_int(spec["joypad_axis"], 0) as JoyAxis
+		m.axis_value = float(spec.get("axis_value", 1.0))
+		m.device = -1
+		return m
+	return "an event needs one of: key, mouse_button, joypad_button, joypad_axis"
+
+
+func _describe_node(node: Node, root: Node, depth: int, max_depth: int) -> Dictionary:
+	var info := {"name": str(node.name), "type": node.get_class()}
+	var script: Variant = node.get_script()
+	if script is Script and script.resource_path != "":
+		info["script"] = script.resource_path
+	if node != root and node.scene_file_path != "":
+		info["instance_of"] = node.scene_file_path
+	var children := []
+	var hidden := 0
+	for child in node.get_children():
+		if child.owner != root:
+			continue  # Internals of instanced scenes and editor-only helpers.
+		if depth >= max_depth:
+			hidden += 1
+		else:
+			children.append(_describe_node(child, root, depth + 1, max_depth))
+	if not children.is_empty():
+		info["children"] = children
+	if hidden > 0:
+		info["children_not_shown"] = hidden
+	return info
+
+
+func _collect_owned_copies(original: Node, copy: Node, root: Node, out: Array) -> void:
+	# Pairs the copy's descendants with the original's to find which ones belong to the scene.
+	var a := original.get_children()
+	var b := copy.get_children()
+	for i in mini(a.size(), b.size()):
+		if a[i].owner == root:
+			out.append(b[i])
+			_collect_owned_copies(a[i], b[i], root, out)
+
+
+func _scene_nodes(node: Node, root: Node, out: Array) -> void:
+	out.append(node)
+	for child in node.get_children():
+		if child.owner == root:
+			_scene_nodes(child, root, out)
 
 
 func _script_methods(script: Script) -> Array:
@@ -832,191 +689,41 @@ func _script_methods(script: Script) -> Array:
 	return names
 
 
-# ---------------------------------------------------------------- run and inspect
-
-func _tool_run_project(args: Dictionary) -> Variant:
-	var mode := str(args.get("mode", "main"))
-	if EditorInterface.is_playing_scene():
-		EditorInterface.stop_playing_scene()
-	match mode:
-		"main":
-			if str(ProjectSettings.get_setting("application/run/main_scene", "")) == "":
-				return _err("No main scene is set. Use mode=current, or set_project_setting application/run/main_scene.")
-			EditorInterface.play_main_scene()
-		"current":
-			var root := _root()
-			if root == null or root.scene_file_path == "":
-				return _err("The edited scene must be saved before it can run.")
-			EditorInterface.play_current_scene()
-		"custom":
-			var path := _res_path(args.get("scene_path", ""))
-			if path == "" or not ResourceLoader.exists(path):
-				return _err("Scene not found: " + str(args.get("scene_path", "")))
-			EditorInterface.play_custom_scene(path)
-		_:
-			return _err("mode must be main, current or custom.")
-	return {"started": mode, "hint": "Use get_output source=game after a moment to read prints and errors, and stop_project to stop."}
+func _scene_history() -> UndoRedo:
+	var root: Variant = _root()
+	if root == null:
+		return null
+	var ur: Variant = _plugin.get_undo_redo()
+	return ur.get_history_undo_redo(ur.get_object_history_id(root))
 
 
-func _tool_stop_project(_args: Dictionary) -> Variant:
-	var was_playing := EditorInterface.is_playing_scene()
-	if was_playing:
-		EditorInterface.stop_playing_scene()
-	return {"stopped": was_playing}
-
-
-func _tool_get_output(args: Dictionary) -> Variant:
-	var count := clampi(_to_int(args.get("lines"), 100), 1, 2000)
-	if str(args.get("source", "editor")) == "game":
-		var log_path := str(ProjectSettings.get_setting("debug/file_logging/log_path", "user://logs/godot.log"))
-		if not FileAccess.file_exists(log_path):
-			return _err("No game log at %s yet. Run the project first (file logging must be enabled in Project Settings > Debug > File Logging)." % log_path)
-		var lines := FileAccess.get_file_as_string(log_path).split("\n")
-		return "\n".join(lines.slice(maxi(lines.size() - count, 0)))
-	var tail: PackedStringArray = _capture.tail(count)
-	return "\n".join(tail) if not tail.is_empty() else "(no output)"
-
-
-func _tool_take_screenshot(args: Dictionary) -> Variant:
-	var target := str(args.get("target", "editor"))
-	if not (target in ["2d", "3d", "editor"]):
-		return _err("target must be 2d, 3d or editor.")
-	if DisplayServer.get_name() == "headless":
-		return _err("No rendered viewport is available (the editor is running headless).")
-	# The 2D/3D viewports only render while their workspace is shown, so switch to it and
-	# capture a few frames later.
-	if target == "2d":
-		EditorInterface.set_main_screen_editor("2D")
-	elif target == "3d":
-		EditorInterface.set_main_screen_editor("3D")
-	var ticket := _next_shot
-	_next_shot -= 1
-	_shots[ticket] = {"target": target, "frames": 4, "max_width": clampi(_to_int(args.get("max_width"), 1280), 64, 4096)}
-	return {"__pending": ticket}
-
-
-func _capture_viewport(target: String, max_width: int) -> Dictionary:
-	var viewport: Viewport
-	match target:
-		"2d":
-			viewport = EditorInterface.get_editor_viewport_2d()
-		"3d":
-			viewport = EditorInterface.get_editor_viewport_3d(0)
-		_:
-			viewport = EditorInterface.get_base_control().get_viewport()
-	var texture := viewport.get_texture() if viewport != null else null
-	var image: Image = texture.get_image() if texture != null else null
-	if image == null or image.is_empty():
-		return _err("Could not capture the viewport.")
-	if image.get_width() > max_width:
-		image.resize(max_width, int(float(image.get_height()) * max_width / image.get_width()), Image.INTERPOLATE_LANCZOS)
-	return {"__image": Marshalls.raw_to_base64(image.save_png_to_buffer())}
-
-
-func _type_name(info: Dictionary, is_return := false) -> String:
-	if info["type"] == TYPE_OBJECT and str(info.get("class_name", "")) != "":
-		return str(info["class_name"])
-	if info["type"] == TYPE_NIL:
-		return "void" if is_return and (info.get("usage", 0) & PROPERTY_USAGE_NIL_IS_VARIANT) == 0 else "Variant"
-	return type_string(info["type"])
-
-
-func _tool_get_class_info(args: Dictionary) -> Variant:
-	var cls := str(args.get("class_name", ""))
-	if not ClassDB.class_exists(cls):
-		for info in ProjectSettings.get_global_class_list():
-			if str(info["class"]) == cls:
-				return {"class": cls, "script": info["path"], "inherits": str(info["base"]), "hint": "Script class: use read_file on the script, and get_class_info on the base class."}
-		return _err("Unknown class: " + cls)
-	var own := not bool(args.get("include_inherited", false))
-	var properties := []
-	for p in ClassDB.class_get_property_list(cls, own):
-		if p["usage"] & (PROPERTY_USAGE_CATEGORY | PROPERTY_USAGE_GROUP | PROPERTY_USAGE_SUBGROUP):
+func _estimate_sibling_size(col_node: Node, is_2d: bool) -> Vector3:
+	var parent := col_node.get_parent()
+	if parent == null:
+		return Vector3.ZERO
+	for sibling in parent.get_children():
+		if sibling == col_node:
 			continue
-		properties.append("%s: %s" % [p["name"], _type_name(p)])
-	var methods := []
-	for m in ClassDB.class_get_method_list(cls, own):
-		if str(m["name"]).begins_with("_"):
-			continue
-		var params := []
-		for a in m["args"]:
-			params.append("%s: %s" % [a["name"], _type_name(a)])
-		methods.append("%s(%s) -> %s" % [m["name"], ", ".join(params), _type_name(m["return"], true)])
-	var signals := []
-	for sig in ClassDB.class_get_signal_list(cls, own):
-		var params := []
-		for a in sig["args"]:
-			params.append("%s: %s" % [a["name"], _type_name(a)])
-		signals.append("%s(%s)" % [sig["name"], ", ".join(params)])
-	return {
-		"class": cls,
-		"inherits": str(ClassDB.get_parent_class(cls)),
-		"can_instantiate": ClassDB.can_instantiate(cls),
-		"properties": properties,
-		"methods": methods,
-		"signals": signals,
-	}
+		if is_2d:
+			if sibling is Sprite2D and sibling.texture != null:
+				var sz: Vector2 = sibling.texture.get_size()
+				if sibling.region_enabled:
+					sz = sibling.region_rect.size
+				sz = Vector2(sz.x / maxf(1, sibling.hframes), sz.y / maxf(1, sibling.vframes)) * sibling.scale.abs()
+				return Vector3(sz.x, sz.y, 0)
+			if sibling is ColorRect:
+				return Vector3(sibling.size.x, sibling.size.y, 0)
+		else:
+			if sibling is MeshInstance3D and sibling.mesh != null:
+				var aabb: AABB = sibling.mesh.get_aabb()
+				var s: Vector3 = aabb.size * sibling.scale.abs()
+				return s
+	return Vector3.ZERO
 
 
-func _tool_get_project_settings(args: Dictionary) -> Variant:
-	var out := {}
-	var names: Variant = args.get("names")
-	if names is Array:
-		for n in names:
-			out[str(n)] = Values.to_json(ProjectSettings.get_setting(str(n))) if ProjectSettings.has_setting(str(n)) else "<not set>"
-	var prefix := str(args.get("prefix", ""))
-	if prefix != "":
-		for p in ProjectSettings.get_property_list():
-			var n := str(p["name"])
-			if n.begins_with(prefix) and out.size() < 300:
-				out[n] = Values.to_json(ProjectSettings.get_setting(n))
-	if out.is_empty():
-		return _err("Give names and/or prefix (e.g. prefix \"application/\").")
-	return out
+func _set_owner_recursive(node: Node, root: Node) -> void:
+	node.owner = root
+	if node.scene_file_path == "":
+		for c in node.get_children():
+			_set_owner_recursive(c, root)
 
-
-func _tool_set_project_setting(args: Dictionary) -> Variant:
-	var name := str(args.get("name", ""))
-	if name == "" or not name.contains("/"):
-		return _err("name must look like \"section/key\", e.g. \"application/run/main_scene\".")
-	var value: Variant = args.get("value")
-	var type := TYPE_NIL
-	if ProjectSettings.has_setting(name):
-		type = typeof(ProjectSettings.get_setting(name))
-	if type == TYPE_OBJECT:
-		type = TYPE_NIL
-	var r := Values.coerce(value, type)
-	if not r[0]:
-		return _err("%s: %s" % [name, r[1]])
-	ProjectSettings.set_setting(name, r[1])
-	var err := ProjectSettings.save()
-	if err != OK:
-		return _err("Could not save project.godot: " + error_string(err))
-	return {"name": name, "value": Values.to_json(ProjectSettings.get_setting(name)) if ProjectSettings.has_setting(name) else null}
-
-
-func _tool_execute_editor_script(args: Dictionary) -> Variant:
-	var code := str(args.get("code", ""))
-	if code.strip_edges() == "":
-		return _err("code is empty.")
-	var body := ""
-	for line in code.split("\n"):
-		body += "\t" + line + "\n"
-	var script := GDScript.new()
-	script.source_code = "@tool\nextends RefCounted\n\nfunc run(plugin: EditorPlugin, scene: Node) -> Variant:\n" + body + "\treturn null\n"
-	var marker: int = _capture.mark()
-	var err := script.reload()
-	if err != OK:
-		var problems := _error_lines(_capture.since(marker))
-		return _err("The code did not compile (line numbers are offset by 4).\n" + ("\n".join(problems) if not problems.is_empty() else "See get_output source=editor."))
-	var runner: Variant = script.new()
-	var result: Variant = runner.run(_plugin, _root())
-	var out := {}
-	if result is Object and result.get_class() == "GDScriptFunctionState":
-		out["result"] = "<coroutine: `await` is not supported here; the code kept running in the background>"
-	else:
-		out["result"] = Values.to_json(result)
-	var logged: PackedStringArray = _capture.since(marker)
-	if not logged.is_empty():
-		out["output"] = "\n".join(logged.slice(maxi(logged.size() - 200, 0)))
-	return out
